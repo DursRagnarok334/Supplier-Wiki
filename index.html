@@ -46,19 +46,7 @@
 const CONFIG = {
   // 1) Firebase — crea un proyecto gratis en https://console.firebase.google.com
   //    Firestore Database → modo producción → copia aquí "Config del SDK"
-
-
-
-<script type="module">
-  // Import the functions you need from the SDKs you need
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-analytics.js";
-  // TODO: Add SDKs for Firebase products that you want to use
-  // https://firebase.google.com/docs/web/setup#available-libraries
-
-  // Your web app's Firebase configuration
-  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-  const firebaseConfig = {
+  firebase: {
     apiKey: "AIzaSyDAXPtN_Qnw7538PzgsJZ8lgJHWqem01Co",
     authDomain: "supplier-wiki.firebaseapp.com",
     projectId: "supplier-wiki",
@@ -66,8 +54,7 @@ const CONFIG = {
     messagingSenderId: "691388487652",
     appId: "1:691388487652:web:06690c3622fce39ab899f1",
     measurementId: "G-TSKC2HJ3R8"
-  };
-  
+  },
   
   // 2) Groq (IA de apoyo) — la key NUNCA va aquí directamente.
   //    Despliega el proxy incluido en groq-proxy-worker.js (Cloudflare Workers,
