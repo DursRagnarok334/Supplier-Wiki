@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wiki Suppliers · Juniper Intranet</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     FIREBASE (almacenamiento de datos: tickets, static data, proveedores)
+     Los datos se guardan en localStorage si no configuras Firebase, y se
+     sincronizan con Firestore automáticamente en cuanto rellenes esto.
+     Las claves de configuración web de Firebase NO son secretas (se
+     protegen con las reglas de seguridad de Firestore, no ocultándolas).
+     ══════════════════════════════════════════════════════════════════════ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+  ::-webkit-scrollbar{width:8px;height:8px;}
+  ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:8px;}
+  .sidebar-item{transition:background .15s;}
+  .sidebar-item:hover{background:rgba(255,255,255,.12);}
+  .sidebar-item.active{background:rgba(255,255,255,.22);}
+  .attachment-card{transition:border-color .15s, box-shadow .15s;}
+  .attachment-card:hover{border-color:#C8102E; box-shadow:0 1px 6px rgba(200,16,46,.12);}
+  .fade-in{animation:fadeIn .18s ease;}
+  @keyframes fadeIn{from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:translateY(0)}}
+  #ai-panel{transition:transform .25s ease;}
+  .typing-dot{animation:blink 1.2s infinite;}
+  .typing-dot:nth-child(2){animation-delay:.2s} .typing-dot:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.2} 40%{opacity:1}}
+</style>
+</head>
+<body class="bg-white text-gray-800">
+
+<div id="app" class="h-screen flex flex-col overflow-hidden"></div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   CONFIGURACIÓN — rellena esto con tus propias claves
+   ════════════════════════════════════════════════════════════════════════ */
+const CONFIG = {
+  // 1) Firebase — crea un proyecto gratis en https://console.firebase.google.com
+  //    Firestore Database → modo producción → copia aquí "Config del SDK"
+  firebase: {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+  },
+
+  // 2) Groq (IA de apoyo) — la key NUNCA va aquí directamente.
+  //    Despliega el proxy incluido en groq-proxy-worker.js (Cloudflare Workers,
+  //    gratis) y pon aquí la URL pública que te da Cloudflare.
+  groqProxyUrl: "", // ej: "https://wiki-suppliers-groq.tuusuario.workers.dev"
+
+  // 3) Google Drive — crea credenciales OAuth "Aplicación web" en
+  //    https://console.cloud.google.com/apis/credentials, habilita
+  //    Google Picker API y Drive API, y añade tu dominio de GitHub Pages
+  //    en "Orígenes autorizados de JavaScript".
+  googleDrive: {
+    clientId: "",
+    apiKey: ""
+  }
+};
+
+const FIREBASE_ENABLED = !!CONFIG.firebase.apiKey;
+let db = null;
+if (FIREBASE_ENABLED) {
+  firebase.initializeApp(CONFIG.firebase);
+  db = firebase.firestore();
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   CONTENIDO DE LA WIKI
+   ════════════════════════════════════════════════════════════════════════ */
+const NAV = [
+  { id: 'proveedores', label: 'Lista proveedores prefered' },
+  { id: 'static-data', label: 'Static Data', children: [
+      { id: 'std-automatica', label: 'Tareas Automáticas' },
+      { id: 'std-manual-ftp', label: 'Tareas manuales FTP' },
+  ]},
+  { id: 'tickets', label: 'Gestión de Tickets' },
+  { id: 'particularidades', label: 'Particularidades conexiones' },
+  { id: 'errores-comunes', label: 'Errores comunes' },
+  { id: 'documentacion', label: 'Documentación', children: [
+      { id: 'doc-manuales', label: 'Manuales' },
+      { id: 'doc-plantillas', label: 'Plantillas' },
+  ]},
+];
+
+const PAGES = {
+  proveedores: {
+    title: 'Lista de Proveedores Preferred',
+    breadcrumbs: ['Wiki Suppliers', 'Lista proveedores preferred'],
+    description: 'Directorio oficial de proveedores con estatus "Preferred" aprobado por el equipo de compras. Estos proveedores han superado el proceso de homologación y cumplen con los estándares de calidad, precio y servicio establecidos por la compañía.',
+    objective: 'Centralizar y mantener actualizada la lista de proveedores de confianza para agilizar el proceso de selección y aprobación en nuevos proyectos de integración.',
+    steps: [
+      { title: '1. Consultar el registro central', content: 'Accede al documento maestro en SharePoint → Compras → Proveedores → Preferred_Suppliers_2025.xlsx. Verifica que el proveedor figure en la columna "Estado" con el valor ACTIVO.' },
+      { title: '2. Verificar vigencia del contrato', content: 'Comprueba en la columna "Vencimiento Contrato" que la fecha no haya expirado. Si el contrato está próximo a vencer (< 30 días), notifica al equipo de compras mediante el canal #suppliers-alerts en Slack.' },
+      { title: '3. Solicitar alta de nuevo proveedor', content: 'Si el proveedor deseado no figura en la lista, completa el formulario de alta (Plantilla_Alta_Proveedor.docx) y envíalo a suppliers@juniper.com. El proceso de revisión tarda entre 5 y 10 días hábiles.' },
+      { title: '4. Actualizar el registro', content: 'Tras recibir confirmación de aprobación, el responsable de área deberá actualizar el registro central con los datos del nuevo proveedor, incluyendo: nombre, CIF, contacto comercial, condiciones de pago y categoría de servicio.' },
+    ],
+    attachments: [
+      { name: 'Preferred_Suppliers_2025.xlsx', type: 'XLSX', size: '248 KB' },
+      { name: 'Formulario_Alta_Proveedor.docx', type: 'DOCX', size: '84 KB' },
+      { name: 'Política_Homologación_Proveedores.pdf', type: 'PDF', size: '1.2 MB' },
+      { name: 'Panel Power BI – Proveedores', type: 'LINK' },
+    ],
+    changelog: [
+      { date: '2025-07-15', author: 'M. García', description: 'Añadidos 3 nuevos proveedores: LogiTech SA, DataBridge SL y CloudOps EU.' },
+      { date: '2025-05-02', author: 'R. Pérez', description: 'Eliminado proveedor InfoSys Ltd por incumplimiento de SLA.' },
+      { date: '2025-02-18', author: 'M. García', description: 'Revisión anual del directorio completo. 12 contratos renovados.' },
+    ],
+  },
+  'std-automatica': {
+    title: 'Static Data – Tareas Automáticas',
+    breadcrumbs: ['Wiki Suppliers', 'Static Data', 'Tareas Automáticas'],
+    description: 'Documentación de los procesos de sincronización automática de datos estáticos entre los sistemas de proveedores y la plataforma interna. Estos procesos se ejecutan mediante jobs programados sin intervención manual.',
+    objective: 'Garantizar la coherencia y actualización automática de los datos maestros de proveedores (catálogos, tarifas, stock) en los sistemas internos mediante flujos ETL programados.',
+    steps: [
+      { title: '1. Verificar el scheduler', content: 'Accede a la consola de Control-M en https://controlm.juniper.int y localiza el folder "SUPPLIERS_STATIC_DATA". Confirma que todos los jobs estén en estado ACTIVE y con la próxima ejecución programada correctamente.' },
+      { title: '2. Revisar logs de ejecución', content: 'Tras cada ejecución automática, consulta los logs en la ruta /var/log/suppliers/static_data/. Los archivos se nombran con el formato YYYYMMDD_job_name.log. Busca entradas ERROR o WARN que requieran atención.' },
+      { title: '3. Validar integridad de datos', content: 'Ejecuta el script de validación validate_static.sh ubicado en /opt/suppliers/scripts/. Genera un informe en /tmp/validation_report_YYYYMMDD.txt con las discrepancias encontradas.' },
+      { title: '4. Gestionar alertas automáticas', content: 'Las alertas se envían automáticamente al grupo suppliers-ops@juniper.com cuando un job falla más de 2 veces consecutivas. Actúa según el runbook del error específico antes de reiniciar manualmente.' },
+    ],
+    attachments: [
+      { name: 'Runbook_Static_Data_Automatico.pdf', type: 'PDF', size: '3.1 MB' },
+      { name: 'Job_Schedule_Matrix.xlsx', type: 'XLSX', size: '156 KB' },
+      { name: 'Script_validate_static.sh', type: 'LINK' },
+    ],
+    changelog: [
+      { date: '2025-07-01', author: 'A. López', description: 'Nuevo job añadido: SYNC_PRICING_REALTIME con frecuencia de 15 minutos.' },
+      { date: '2025-04-10', author: 'C. Martín', description: 'Migración de scheduler de Autosys a Control-M. Todos los jobs actualizados.' },
+      { date: '2025-01-22', author: 'A. López', description: 'Ajuste de ventanas de ejecución para evitar conflicto con mantenimientos nocturnos.' },
+    ],
+  },
+  'std-manual-ftp': {
+    title: 'Static Data – Tareas Manuales FTP',
+    breadcrumbs: ['Wiki Suppliers', 'Static Data', 'Tareas manuales FTP'],
+    description: 'Procedimiento para la carga y descarga manual de ficheros de datos estáticos a través de conexiones FTP/SFTP con proveedores que no soportan integración automática.',
+    objective: 'Establecer un proceso estandarizado y seguro para la transferencia manual de ficheros con proveedores legacy que operan mediante protocolos FTP tradicionales.',
+    steps: [
+      { title: '1. Preparar el entorno de conexión', content: 'Abre FileZilla Pro o WinSCP con el perfil del proveedor correspondiente. Las credenciales se almacenan en el gestor de contraseñas corporativo (CyberArk). Nunca uses credenciales en texto plano ni las compartas por email.' },
+      { title: '2. Verificar directorio remoto', content: 'Navega al directorio /inbox/ del servidor del proveedor. Comprueba que los ficheros tengan la nomenclatura correcta: PREFIX_YYYYMMDD_HHMMSS.csv. Ficheros con formato incorrecto deben ser rechazados y reportados.' },
+      { title: '3. Descargar y validar ficheros', content: 'Descarga los ficheros al directorio local /staging/suppliers/[NOMBRE_PROVEEDOR]/. Ejecuta el script check_file_format.py para validar estructura, encoding (UTF-8) y número de columnas esperadas antes de procesar.' },
+      { title: '4. Cargar en el sistema destino', content: 'Una vez validados, importa los ficheros mediante la interfaz de administración en https://admin.juniper.int/suppliers/import. Registra el ID de carga en el registro diario (FTP_Load_Log.xlsx) con fecha, proveedor, nº de registros y resultado.' },
+    ],
+    attachments: [
+      { name: 'FTP_Load_Log_2025.xlsx', type: 'XLSX', size: '89 KB' },
+      { name: 'Guía_FileZilla_Proveedores.pdf', type: 'PDF', size: '2.4 MB' },
+      { name: 'Script_check_file_format.py', type: 'LINK' },
+      { name: 'Inventario_Servidores_FTP.xlsx', type: 'XLSX', size: '44 KB' },
+    ],
+    changelog: [
+      { date: '2025-06-20', author: 'B. Torres', description: 'Añadido proveedor EuroData GmbH al listado FTP. Nueva ruta /inbox/euro/.' },
+      { date: '2025-03-05', author: 'A. López', description: 'Migración de FTP puro a SFTP en todos los proveedores activos. Actualización de certificados.' },
+      { date: '2025-01-08', author: 'B. Torres', description: 'Script check_file_format.py actualizado para soportar formato ISO-8859-1 legacy.' },
+    ],
+  },
+  particularidades: {
+    title: 'Particularidades de Conexiones',
+    breadcrumbs: ['Wiki Suppliers', 'Particularidades conexiones'],
+    description: 'Registro de las configuraciones especiales, restricciones técnicas y comportamientos no estándar de las conexiones con cada proveedor. Documento crítico para troubleshooting y onboarding de nuevos técnicos.',
+    objective: 'Documentar de forma centralizada todas las peculiaridades técnicas de las integraciones activas para reducir el tiempo de resolución de incidencias y preservar el conocimiento operacional.',
+    steps: [
+      { title: 'ProveedorA – TechSupply Corp', content: 'Requiere cabecera HTTP personalizada X-Client-ID: juniper_prod en todas las llamadas API. Timeout configurado a 45 segundos (superior al estándar de 30s). Ventana de mantenimiento: domingos 02:00-04:00 UTC. IP allowlist obligatoria: solicitar al proveedor antes de cada despliegue en nuevo entorno.' },
+      { title: 'ProveedorB – DataBridge SL', content: 'API REST con autenticación OAuth 2.0 y refresh token de solo 24 horas (inusualmente corto). El endpoint /v2/catalog devuelve paginación inversa (última página primero). Encoding de respuestas en Latin-1 pese a indicar UTF-8 en cabeceras — aplicar conversión manual en el parser.' },
+      { title: 'ProveedorC – LogiTech SA', content: 'Conexión SOAP 1.1 legacy. El WSDL se actualiza sin aviso previo: suscribirse a las alertas de cambio en el portal del proveedor. Campos de fecha en formato DD/MM/YYYY en lugar de ISO 8601. El campo "stock" puede devolver valores negativos que representan pedidos pendientes, no errores.' },
+      { title: 'ProveedorD – CloudOps EU', content: 'Rate limiting estricto: 100 peticiones/minuto por API key. En entorno de producción disponemos de 3 keys rotativas. El sistema de webhooks requiere confirmación de recepción (ACK) en menos de 5 segundos o reintenta 3 veces con backoff exponencial. Certificado SSL autofirmado en entorno de staging.' },
+    ],
+    attachments: [
+      { name: 'Mapa_Conexiones_Técnico.pdf', type: 'PDF', size: '5.7 MB' },
+      { name: 'Inventario_Credenciales_Técnicas.xlsx', type: 'XLSX', size: '201 KB' },
+      { name: 'Confluence – Diagramas de Integración', type: 'LINK' },
+    ],
+    changelog: [
+      { date: '2025-07-10', author: 'C. Martín', description: 'Documentadas las particularidades de CloudOps EU tras el go-live de la integración.' },
+      { date: '2025-05-28', author: 'C. Martín', description: 'Actualizado timeout de TechSupply Corp de 30s a 45s tras acuerdo de nivel de servicio.' },
+      { date: '2025-03-14', author: 'R. Pérez', description: 'Añadida nota crítica sobre encoding incorrecto de DataBridge SL.' },
+    ],
+  },
+  'errores-comunes': {
+    title: 'Errores Comunes',
+    breadcrumbs: ['Wiki Suppliers', 'Errores comunes'],
+    description: 'Catálogo de errores frecuentes en las integraciones con proveedores, con causa raíz identificada y pasos de resolución validados por el equipo técnico.',
+    objective: 'Reducir el tiempo medio de resolución (MTTR) de incidencias recurrentes proporcionando una guía de referencia rápida para el equipo de soporte y desarrollo.',
+    steps: [
+      { title: 'ERR-001 – Connection Timeout (HTTP 504)', content: 'Causa: el proveedor no responde dentro del timeout configurado. Resolución: (1) Verificar el estado del servicio en el portal del proveedor. (2) Comprobar conectividad de red desde la consola de integración con ping/traceroute. (3) Si el problema persiste más de 10 min, escalar al contacto técnico del proveedor y abrir incidencia en JIRA.' },
+      { title: 'ERR-002 – Authentication Failed (HTTP 401)', content: 'Causa más frecuente: token expirado o credenciales rotadas por el proveedor sin aviso. Resolución: (1) Refrescar el token de acceso. (2) Si falla, contactar al proveedor para confirmar si han rotado credenciales. (3) Actualizar las credenciales en CyberArk y en el gestor de configuración. (4) Documentar el incidente en el registro de cambios.' },
+      { title: 'ERR-003 – Invalid Data Format (HTTP 422)', content: 'Causa: el payload enviado no cumple el esquema esperado por el proveedor. Resolución: (1) Revisar los logs del request fallido para identificar el campo problemático. (2) Comparar contra la documentación de API vigente. (3) Corregir el mapper en el código de integración y desplegar hotfix si es urgente.' },
+      { title: 'ERR-004 – Duplicate Record (409 Conflict)', content: 'Causa: intento de insertar un registro que ya existe en el sistema del proveedor. Resolución: (1) Implementar lógica de deduplicación previa al envío. (2) Verificar si el proceso fue ejecutado dos veces. (3) Usar el endpoint de actualización (PUT/PATCH) en lugar de creación (POST) si el registro ya existe.' },
+      { title: 'ERR-005 – FTP Connection Refused', content: 'Causa: el servidor FTP del proveedor rechaza la conexión. Posibles razones: IP no en allowlist, certificado expirado, servidor en mantenimiento. Resolución: (1) Verificar que la IP está en la allowlist. (2) Comprobar vigencia del certificado SFTP. (3) Contactar al administrador del proveedor con el log completo de conexión.' },
+    ],
+    attachments: [
+      { name: 'Catálogo_Errores_Completo_v3.pdf', type: 'PDF', size: '4.2 MB' },
+      { name: 'Plantilla_Incidencia_JIRA.docx', type: 'DOCX', size: '62 KB' },
+      { name: 'Dashboard_Incidencias_Suppliers', type: 'LINK' },
+    ],
+    changelog: [
+      { date: '2025-07-22', author: 'A. López', description: 'Añadido ERR-005 tras incidente crítico con FTP de EuroData GmbH.' },
+      { date: '2025-06-01', author: 'C. Martín', description: 'Revisado ERR-002 con nuevo procedimiento de rotación de credenciales en CyberArk.' },
+      { date: '2025-04-15', author: 'R. Pérez', description: 'Creación inicial del catálogo de errores con ERR-001 a ERR-004.' },
+    ],
+  },
+  'doc-manuales': {
+    title: 'Documentación – Manuales',
+    breadcrumbs: ['Wiki Suppliers', 'Documentación', 'Manuales'],
+    description: 'Repositorio de manuales técnicos y de usuario para los sistemas de gestión de proveedores. Incluye guías de configuración, administración y uso de las plataformas integradas.',
+    objective: 'Proporcionar documentación técnica completa y actualizada para facilitar la configuración, mantenimiento y uso de los sistemas de integración con proveedores.',
+    steps: [
+      { title: '1. Manual de Administración del Sistema', content: 'Cubre la configuración inicial del entorno, gestión de usuarios y permisos, parametrización de conexiones y administración de jobs. Versión actual: v4.2. Última revisión: marzo 2025.' },
+      { title: '2. Manual de Usuario – Portal Suppliers', content: 'Guía paso a paso para usuarios de negocio. Incluye: alta de pedidos, consulta de estado, generación de informes y gestión de incidencias. Disponible en español e inglés.' },
+      { title: '3. Manual de API – Referencia Técnica', content: 'Documentación completa de todos los endpoints disponibles, modelos de datos, códigos de error y ejemplos de request/response. Generado automáticamente desde Swagger/OpenAPI 3.0.' },
+      { title: '4. Guía de Onboarding Técnico', content: 'Documento de bienvenida para nuevos miembros del equipo técnico. Incluye configuración del entorno de desarrollo, accesos necesarios, arquitectura del sistema y primeros pasos con las integraciones.' },
+    ],
+    attachments: [
+      { name: 'Manual_Administración_v4.2.pdf', type: 'PDF', size: '12.8 MB' },
+      { name: 'Manual_Usuario_Portal_ES.pdf', type: 'PDF', size: '6.3 MB' },
+      { name: 'Manual_Usuario_Portal_EN.pdf', type: 'PDF', size: '6.1 MB' },
+      { name: 'API_Reference_OpenAPI.pdf', type: 'PDF', size: '3.9 MB' },
+      { name: 'Guía_Onboarding_Técnico.docx', type: 'DOCX', size: '445 KB' },
+      { name: 'Swagger UI – API Docs', type: 'LINK' },
+    ],
+    changelog: [
+      { date: '2025-07-05', author: 'M. García', description: 'Actualizado Manual de Administración a v4.2 con nuevas funcionalidades de Control-M.' },
+      { date: '2025-05-20', author: 'B. Torres', description: 'Publicada Guía de Onboarding Técnico para nuevas incorporaciones Q2 2025.' },
+      { date: '2025-03-01', author: 'M. García', description: 'Actualización de manuales de usuario post migración a Portal v3.' },
+    ],
+  },
+  'doc-plantillas': {
+    title: 'Documentación – Plantillas',
+    breadcrumbs: ['Wiki Suppliers', 'Documentación', 'Plantillas'],
+    description: 'Colección de plantillas estandarizadas para documentos operacionales, contratos, formularios de alta/baja y registros de actividad relacionados con la gestión de proveedores.',
+    objective: 'Asegurar la consistencia y calidad de la documentación generada por el equipo mediante plantillas corporativas aprobadas y actualizadas.',
+    steps: [
+      { title: '1. Usar siempre la versión más reciente', content: 'Antes de completar cualquier plantilla, verifica que estás usando la versión publicada en esta sección. Las versiones locales o desactualizadas pueden contener campos obsoletos o no conformes con la política vigente.' },
+      { title: '2. Completar todos los campos obligatorios', content: 'Los campos marcados con (*) son obligatorios. Los documentos incompletos serán devueltos para corrección. Para dudas sobre qué información incluir, consulta las notas a pie de cada plantilla.' },
+      { title: '3. Nomenclatura de archivos', content: 'Al guardar documentos completados, usa el formato: TIPO_PROVEEDOR_YYYYMMDD.extensión. Ejemplo: ALTA_TECHSUPPLY_20250715.docx. Esto facilita la búsqueda y el archivado automático.' },
+      { title: '4. Envío y archivado', content: 'Una vez completado el documento, envíalo a la dirección de destino indicada en la plantilla y guarda una copia firmada en la carpeta compartida de SharePoint correspondiente al proveedor.' },
+    ],
+    attachments: [
+      { name: 'Plantilla_Alta_Proveedor.docx', type: 'DOCX', size: '84 KB' },
+      { name: 'Plantilla_Baja_Proveedor.docx', type: 'DOCX', size: '71 KB' },
+      { name: 'Plantilla_Incidencia_Técnica.docx', type: 'DOCX', size: '62 KB' },
+      { name: 'Plantilla_Informe_Mensual.xlsx', type: 'XLSX', size: '134 KB' },
+      { name: 'Plantilla_Contrato_Marco.docx', type: 'DOCX', size: '228 KB' },
+      { name: 'Plantilla_Acta_Reunión.docx', type: 'DOCX', size: '48 KB' },
+    ],
+    changelog: [
+      { date: '2025-07-01', author: 'M. García', description: 'Revisión semestral de todas las plantillas. Actualizado logo corporativo a nueva versión.' },
+      { date: '2025-04-22', author: 'R. Pérez', description: 'Nueva plantilla: Plantilla_Contrato_Marco.docx aprobada por el departamento legal.' },
+      { date: '2025-02-10', author: 'B. Torres', description: 'Añadida Plantilla_Acta_Reunión.docx a solicitud del equipo de proyecto.' },
+    ],
+  },
+};
+
+const DRAWER_COLORS = [
+  { label: 'Rojo', value: '#C8102E', bg: '#FEF2F2' },
+  { label: 'Azul', value: '#2563EB', bg: '#EFF6FF' },
+  { label: 'Verde', value: '#16A34A', bg: '#F0FDF4' },
+  { label: 'Naranja', value: '#D97706', bg: '#FFFBEB' },
+  { label: 'Violeta', value: '#7C3AED', bg: '#F5F3FF' },
+  { label: 'Gris', value: '#4B5563', bg: '#F9FAFB' },
+];
+
+const DEFAULT_DRAWERS = [
+  { id: 1, title: 'Asignación por tipo de incidencia', color: '#C8102E', lastEdited: '2025-07-15',
+    content: '• Incidencias de integración API → Equipo Backend (A. López, C. Martín)\n• Incidencias FTP / transferencia de ficheros → B. Torres\n• Incidencias de calidad de datos → R. Pérez\n• Incidencias de acceso / credenciales → Equipo de Seguridad IT' },
+  { id: 2, title: 'Asignación por proveedor', color: '#2563EB', lastEdited: '2025-07-20',
+    content: '• TechSupply Corp → A. López (responsable de cuenta técnica)\n• DataBridge SL → B. Torres\n• LogiTech SA → C. Martín\n• CloudOps EU → A. López\n• EuroData GmbH → B. Torres\n\nNota: En ausencia del responsable principal, escalar al responsable de área.' },
+  { id: 3, title: 'Escalado y SLAs', color: '#D97706', lastEdited: '2025-07-22',
+    content: 'Tiempos máximos de primera respuesta:\n• Crítica → 1 hora\n• Alta → 4 horas hábiles\n• Media → 1 día hábil\n• Baja → 3 días hábiles\n\nEscalado automático: si no hay respuesta en el doble del SLA, notificar al responsable de área.' },
+  { id: 4, title: 'Horario de guardia y cobertura', color: '#16A34A', lastEdited: '2025-07-28',
+    content: 'Horario habitual de atención: L–V 08:00–18:00 (CET).\n\nFuera de horario:\n• Incidencias Críticas y Altas → canal #oncall en Slack. Turno rotativo semanal.\n• Incidencias Media/Baja → se atienden al inicio del siguiente día hábil.' },
+];
+
+const FILE_ICONS = { PDF:{c:'#DC2626',bg:'#FEF2F2'}, XLSX:{c:'#16A34A',bg:'#F0FDF4'}, DOCX:{c:'#2563EB',bg:'#EFF6FF'}, LINK:{c:'#7C3AED',bg:'#F5F3FF'} };
+function fileMeta(name){ const ext=(name.split('.').pop()||'').toLowerCase();
+  const map={pdf:'PDF',xlsx:'XLSX',xls:'XLSX',docx:'DOCX',doc:'DOCX',csv:'CSV',txt:'TXT',png:'IMG',jpg:'IMG',jpeg:'IMG'};
+  const label = map[ext] || (ext.toUpperCase()||'FILE');
+  const colors = {PDF:['#DC2626','#FEF2F2'],XLSX:['#16A34A','#F0FDF4'],DOCX:['#2563EB','#EFF6FF'],CSV:['#0891B2','#ECFEFF'],TXT:['#6B7280','#F9FAFB'],IMG:['#7C3AED','#F5F3FF'],FILE:['#6B7280','#F9FAFB']};
+  const [c,bg] = colors[label]||colors.FILE;
+  return {label,c,bg};
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function nl2br(s){ return esc(s).replace(/\n/g,'<br>'); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   ESTADO — persistido en localStorage y, si está configurado, en Firestore
+   ════════════════════════════════════════════════════════════════════════ */
+const State = {
+  activeId: 'proveedores',
+  openGroups: new Set(['static-data','documentacion']),
+  searchQuery: '',
+  searchOpen: false,
+  drawers: JSON.parse(localStorage.getItem('ws_drawers') || 'null') || DEFAULT_DRAWERS,
+  suppliers: JSON.parse(localStorage.getItem('ws_suppliers') || 'null') || ['TechSupply Corp','DataBridge SL','LogiTech SA','CloudOps EU','EuroData GmbH'],
+  staticRecords: JSON.parse(localStorage.getItem('ws_static') || 'null') || { 'std-automatica': [], 'std-manual-ftp': [] },
+  aiOpen: false,
+  aiMessages: [],
+  aiLoading: false,
+};
+
+function persist(){
+  localStorage.setItem('ws_drawers', JSON.stringify(State.drawers));
+  localStorage.setItem('ws_suppliers', JSON.stringify(State.suppliers));
+  localStorage.setItem('ws_static', JSON.stringify(State.staticRecords));
+  if (FIREBASE_ENABLED && db) {
+    db.collection('wiki_suppliers').doc('data').set({
+      drawers: State.drawers, suppliers: State.suppliers, staticRecords: State.staticRecords,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true }).catch(e => console.error('Firestore sync error:', e));
+  }
+}
+async function loadFromFirestore(){
+  if (!FIREBASE_ENABLED || !db) return;
+  try {
+    const snap = await db.collection('wiki_suppliers').doc('data').get();
+    if (snap.exists) {
+      const d = snap.data();
+      if (d.drawers) State.drawers = d.drawers;
+      if (d.suppliers) State.suppliers = d.suppliers;
+      if (d.staticRecords) State.staticRecords = d.staticRecords;
+      render();
+    }
+    // Escucha cambios en vivo de otros miembros del equipo
+    db.collection('wiki_suppliers').doc('data').onSnapshot(snap => {
+      if (!snap.exists) return;
+      const d = snap.data();
+      if (d.drawers) State.drawers = d.drawers;
+      if (d.suppliers) State.suppliers = d.suppliers;
+      if (d.staticRecords) State.staticRecords = d.staticRecords;
+      render();
+    });
+  } catch(e){ console.error('Error cargando Firestore:', e); }
+}
+
+function searchableText(id, page){
+  return [page.title, page.description, page.objective,
+    ...page.steps.map(s=>s.title+' '+s.content),
+    ...page.attachments.map(a=>a.name)].join(' ').toLowerCase();
+}
+function doSearch(q){
+  q = q.trim().toLowerCase();
+  if (!q) return null;
+  return Object.entries(PAGES).filter(([id,p]) => searchableText(id,p).includes(q))
+    .map(([id,p]) => ({ id, title: p.title, breadcrumbs: p.breadcrumbs, description: p.description }));
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   RENDER
+   ════════════════════════════════════════════════════════════════════════ */
+function navigate(id){ State.activeId = id; State.searchOpen = false; State.searchQuery=''; render(); window.scrollTo(0,0); }
+function toggleGroup(id){ State.openGroups.has(id) ? State.openGroups.delete(id) : State.openGroups.add(id); render(); }
+
+function renderSidebar(){
+  const items = NAV.map(item => {
+    if (item.children) {
+      const isOpen = State.openGroups.has(item.id);
+      const childActive = item.children.some(c => c.id === State.activeId);
+      return `
+      <div>
+        <button onclick="toggleGroup('${item.id}')" class="sidebar-item w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-white text-sm font-medium ${childActive?'active':''}">
+          <span>${item.label}</span>
+          <i class="fa-solid fa-chevron-down text-xs transition-transform" style="opacity:.7; transform:rotate(${isOpen?180:0}deg)"></i>
+        </button>
+        ${isOpen ? `<div class="mt-0.5 ml-3 space-y-0.5">
+          ${item.children.map(c => `
+            <button onclick="navigate('${c.id}')" class="sidebar-item w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white ${c.id===State.activeId?'active':'opacity-80'}">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-white opacity-60 flex-shrink-0"></span>${c.label}
+            </button>`).join('')}
+        </div>` : ''}
+      </div>`;
+    }
+    const isActive = item.id === State.activeId;
+    return `<button onclick="navigate('${item.id}')" class="sidebar-item w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium text-white ${isActive?'active':'opacity-85'}">${item.label}</button>`;
+  }).join('');
+
+  return `
+  <aside class="flex flex-col flex-shrink-0 overflow-y-auto" style="width:240px; background:#C8102E">
+    <div class="px-5 pt-5 pb-4 border-b" style="border-color:rgba(255,255,255,.15)">
+      <p class="text-white text-xs font-semibold uppercase tracking-widest opacity-70">Wiki</p>
+      <p class="text-white text-base font-bold mt-0.5 leading-tight">Suppliers</p>
+    </div>
+    <nav class="flex-1 px-3 py-4 space-y-0.5">${items}</nav>
+    <div class="px-5 py-4 border-t" style="border-color:rgba(255,255,255,.15)">
+      <p class="text-white text-xs opacity-50">Wiki Suppliers v1.0</p>
+      <p class="text-white text-xs opacity-40">Juniper Intranet · ${new Date().getFullYear()}</p>
+    </div>
+  </aside>`;
+}
+
+function renderHeader(){
+  const results = State.searchOpen ? doSearch(State.searchQuery) : null;
+  return `
+  <header class="flex items-center gap-4 px-5 flex-shrink-0 border-b border-gray-200" style="height:60px">
+    <div class="flex items-center gap-2 select-none">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M14 2L26 14L14 26L2 14L14 2Z" fill="#C8102E"/><path d="M14 7L21 14L14 21L7 14L14 7Z" fill="white"/><path d="M14 10L18 14L14 18L10 14L14 10Z" fill="#C8102E"/></svg>
+      <div class="leading-none"><span style="font-weight:700;font-size:15px;color:#1a202c">juniper</span><span style="font-weight:400;font-size:11px;color:#6b7280;letter-spacing:.08em;margin-left:4px">INTRANET</span></div>
+    </div>
+    <div class="relative flex-1 max-w-md">
+      <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+      <input id="searchInput" type="text" placeholder="Buscar en la wiki…" value="${esc(State.searchQuery)}"
+        oninput="onSearchInput(this.value)"
+        class="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100">
+      ${State.searchOpen ? `
+      <div class="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg border border-gray-200 shadow-lg max-h-80 overflow-y-auto z-20">
+        ${results && results.length ? results.map(r => `
+          <button onclick="navigate('${r.id}')" class="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 text-left border-b border-gray-100 last:border-0">
+            <i class="fa-regular fa-file-lines text-gray-400 mt-0.5"></i>
+            <div><p class="text-sm font-medium text-gray-800">${esc(r.title)}</p><p class="text-xs text-gray-400 mt-0.5">${esc(r.breadcrumbs.join(' › '))}</p></div>
+          </button>`).join('') : `<p class="text-sm text-gray-400 px-4 py-6 text-center">Sin resultados para "${esc(State.searchQuery)}"</p>`}
+      </div>` : ''}
+    </div>
+    <div class="flex items-center gap-3 ml-auto flex-shrink-0">
+      <button onclick="toggleAI()" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style="background:#C8102E">
+        <i class="fa-solid fa-wand-magic-sparkles"></i> Asistente IA
+      </button>
+      <div class="flex items-center gap-2 rounded-lg px-2 py-1">
+        <div class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold" style="background:#C8102E">EQ</div>
+        <div class="hidden sm:block"><p class="text-xs font-semibold text-gray-700 leading-none">Equipo</p><p class="text-xs text-gray-400 leading-none mt-0.5">Miembro</p></div>
+      </div>
+    </div>
+  </header>`;
+}
+
+function onSearchInput(v){ State.searchQuery = v; State.searchOpen = v.trim().length>0; renderHeaderOnly(); }
+function renderHeaderOnly(){
+  document.getElementById('headerSlot').outerHTML = `<div id="headerSlot">${renderHeader()}</div>`;
+  document.getElementById('searchInput').focus();
+  document.getElementById('searchInput').setSelectionRange(State.searchQuery.length, State.searchQuery.length);
+}
+
+function breadcrumbsHTML(arr){
+  return `<nav class="flex items-center gap-1.5 text-xs text-gray-400 mb-6 flex-wrap">
+    ${arr.map((c,i)=>`<span class="flex items-center gap-1.5">${i>0?'<span>/</span>':''}<span class="${i===arr.length-1?'text-gray-600 font-medium':''}">${esc(c)}</span></span>`).join('')}
+  </nav>`;
+}
+
+function renderPageContent(page){
+  return `
+  <article class="max-w-4xl mx-auto px-8 py-8 fade-in">
+    ${breadcrumbsHTML(page.breadcrumbs)}
+    <h1 class="text-3xl font-bold text-gray-900 mb-6" style="letter-spacing:-0.02em">${esc(page.title)}</h1>
+    <section class="mb-8 p-5 rounded-xl border-l-4 bg-gray-50" style="border-left-color:#C8102E">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Descripción</h2>
+      <p class="text-gray-700 leading-relaxed text-sm">${esc(page.description)}</p>
+    </section>
+    <section class="mb-8">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Objetivo</h2>
+      <p class="text-gray-700 leading-relaxed text-sm">${esc(page.objective)}</p>
+    </section>
+    <section class="mb-8">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Procedimiento</h2>
+      <div class="space-y-4">
+        ${page.steps.map(s => `
+        <div class="rounded-xl border border-gray-200 p-5">
+          <h3 class="text-sm font-semibold text-gray-800 mb-1.5">${esc(s.title)}</h3>
+          <p class="text-sm text-gray-600 leading-relaxed">${esc(s.content)}</p>
+        </div>`).join('')}
+      </div>
+    </section>
+    <section class="mb-8">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Documentos adjuntos</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        ${page.attachments.map(a => { const m = FILE_ICONS[a.type]||FILE_ICONS.LINK;
+          return `<div class="attachment-card flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+            <div class="flex items-center justify-center rounded-md text-xs font-bold flex-shrink-0" style="width:40px;height:40px;background:${m.bg};color:${m.c};font-family:monospace">${a.type==='LINK'?'<i class="fa-solid fa-arrow-up-right-from-square"></i>':a.type}</div>
+            <div class="min-w-0 flex-1"><p class="text-sm font-medium text-gray-800 truncate">${esc(a.name)}</p>${a.size?`<p class="text-xs text-gray-400 mt-0.5">${esc(a.size)}</p>`:''}</div>
+            <i class="fa-solid fa-download text-gray-400"></i>
+          </div>`; }).join('')}
+      </div>
+    </section>
+    <section>
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Historial de cambios</h2>
+      <div>${page.changelog.map(e => `
+        <div class="flex items-start gap-4 py-3 border-b border-gray-100 last:border-0">
+          <span class="text-xs font-mono text-gray-400 whitespace-nowrap pt-0.5" style="min-width:88px">${esc(e.date)}</span>
+          <span class="text-xs font-semibold text-gray-500 whitespace-nowrap pt-0.5" style="min-width:80px">${esc(e.author)}</span>
+          <span class="text-sm text-gray-600">${esc(e.description)}</span>
+        </div>`).join('')}</div>
+    </section>
+  </article>`;
+}
+
+/* ── Proveedores ── */
+let supplierInputVal = '';
+function addSupplier(){
+  const v = document.getElementById('supplierInput').value.trim();
+  if (!v) return;
+  State.suppliers.push(v); persist(); renderMain();
+}
+function removeSupplier(i){ State.suppliers.splice(i,1); persist(); renderMain(); }
+
+function renderSupplierListPage(){
+  return `
+  <article class="max-w-3xl mx-auto px-8 py-8 fade-in">
+    ${breadcrumbsHTML(['Wiki Suppliers','Lista proveedores preferred'])}
+    <h1 class="text-3xl font-bold text-gray-900 mb-2" style="letter-spacing:-0.02em">Lista de Proveedores Preferred</h1>
+    <p class="text-sm text-gray-500 mb-8">Proveedores homologados y aprobados por el equipo de compras. <span class="font-semibold text-gray-700">${State.suppliers.length}</span> ${State.suppliers.length===1?'proveedor registrado':'proveedores registrados'}.</p>
+    <div class="flex gap-2 mb-8">
+      <input id="supplierInput" type="text" placeholder="Nombre del proveedor…" onkeydown="if(event.key==='Enter')addSupplier()"
+        class="flex-1 px-4 py-2.5 text-sm rounded-lg border border-gray-200 bg-white outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100">
+      <button onclick="addSupplier()" class="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white" style="background:#C8102E"><i class="fa-solid fa-plus"></i> Añadir</button>
+    </div>
+    ${State.suppliers.length===0 ? `
+    <div class="flex flex-col items-center justify-center py-20 rounded-xl border-2 border-dashed border-gray-200 text-gray-400">
+      <i class="fa-solid fa-users text-3xl mb-3 opacity-50"></i><p class="text-sm font-medium">Aún no hay proveedores</p>
+    </div>` : `
+    <ul class="space-y-2">
+      ${State.suppliers.map((name,i) => `
+      <li class="group flex items-center gap-4 px-5 py-3.5 rounded-lg bg-white border border-gray-200 hover:border-gray-300">
+        <span class="flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0" style="width:28px;height:28px;background:#FEF2F2;color:#C8102E">${i+1}</span>
+        <span class="flex-1 text-sm font-medium text-gray-800">${esc(name)}</span>
+        <button onclick="removeSupplier(${i})" class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash text-xs"></i></button>
+      </li>`).join('')}
+    </ul>`}
+  </article>`;
+}
+
+/* ── Tickets (cajones) ── */
+let ticketForm = { title:'', content:'', color:'#C8102E' };
+let ticketExpanded = null, ticketEditing = null, ticketShowNew = false;
+
+function drawerFormHTML(saveLabel, onSave, compact){
+  return `
+  <div class="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm ${compact?'':'mb-6'}">
+    ${!compact ? `<div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2"><i class="fa-solid fa-plus text-xs" style="color:#C8102E"></i><span class="text-sm font-semibold text-gray-700">Nuevo cajón</span></div>`:''}
+    <div class="px-6 py-5 space-y-4">
+      <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Título <span style="color:#C8102E">*</span></label>
+        <input id="ticketFormTitle" type="text" placeholder="Nombre de la sección…" value="${esc(ticketForm.title)}" oninput="ticketForm.title=this.value"
+          class="w-full px-4 py-2.5 text-sm rounded-lg border border-gray-200 bg-gray-50 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"></div>
+      <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Color identificador</label>
+        <div class="flex items-center gap-2 flex-wrap">
+          ${DRAWER_COLORS.map(c => `<button onclick='ticketForm.color=${JSON.stringify(c.value)};renderMain()' class="w-7 h-7 rounded-full border-2" style="background:${c.value};border-color:${ticketForm.color===c.value?'#1a202c':'transparent'}" title="${c.label}"></button>`).join('')}
+        </div></div>
+      <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Contenido</label>
+        <textarea id="ticketFormContent" rows="5" placeholder="Describe las reglas, criterios o notas…" oninput="ticketForm.content=this.value"
+          class="w-full px-4 py-3 text-sm rounded-lg border border-gray-200 bg-gray-50 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100 resize-none">${esc(ticketForm.content)}</textarea></div>
+    </div>
+    <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
+      <button onclick="${compact?'ticketEditing=null;renderMain()':'ticketShowNew=false;renderMain()'}" class="px-5 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-200">Cancelar</button>
+      <button onclick="${onSave}" class="px-5 py-2 rounded-lg text-sm font-semibold text-white" style="background:#C8102E">${saveLabel}</button>
+    </div>
+  </div>`;
+}
+function newDrawerOpen(){ ticketForm={title:'',content:'',color:'#C8102E'}; ticketShowNew=true; ticketExpanded=null; ticketEditing=null; renderMain(); }
+function newDrawerSave(){
+  if (!ticketForm.title.trim()) return;
+  const today = new Date().toLocaleDateString('es-ES');
+  State.drawers.push({ id: Date.now(), title: ticketForm.title.trim(), content: ticketForm.content, color: ticketForm.color, lastEdited: today });
+  ticketShowNew = false; persist(); renderMain();
+}
+function drawerEdit(id){ const d = State.drawers.find(x=>x.id===id); ticketForm={title:d.title,content:d.content,color:d.color}; ticketEditing=id; ticketExpanded=id; renderMain(); }
+function drawerSaveEdit(id){
+  const d = State.drawers.find(x=>x.id===id);
+  const today = new Date().toLocaleDateString('es-ES');
+  Object.assign(d, { title: ticketForm.title.trim()||d.title, content: ticketForm.content, color: ticketForm.color, lastEdited: today });
+  ticketEditing = null; persist(); renderMain();
+}
+function drawerDelete(id){ State.drawers = State.drawers.filter(x=>x.id!==id); if(ticketExpanded===id) ticketExpanded=null; persist(); renderMain(); }
+function drawerToggle(id){ ticketExpanded = ticketExpanded===id ? null : id; renderMain(); }
+
+function renderTicketsPage(){
+  return `
+  <article class="max-w-3xl mx-auto px-8 py-8 fade-in">
+    ${breadcrumbsHTML(['Wiki Suppliers','Gestión de Tickets'])}
+    <div class="flex items-start justify-between gap-4 mb-2">
+      <div><h1 class="text-3xl font-bold text-gray-900" style="letter-spacing:-0.02em">Gestión de Tickets</h1>
+        <p class="text-sm text-gray-500 mt-1.5">Particularidades y criterios para la asignación de tickets por proveedor, tipo de incidencia y equipo responsable.</p></div>
+      <button onclick="newDrawerOpen()" class="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white mt-1" style="background:#C8102E"><i class="fa-solid fa-plus"></i> Nuevo cajón</button>
+    </div>
+    <div class="flex items-start gap-3 rounded-lg px-4 py-3 mb-8 mt-5 border" style="background:#FFFBEB;border-color:#FDE68A">
+      <i class="fa-solid fa-circle-info mt-0.5" style="color:#D97706"></i>
+      <p class="text-xs text-yellow-800 leading-relaxed">Esta sección es una <strong>referencia documental</strong> sobre cómo se asignan los tickets. No se registran ni gestionan tickets aquí. Para cada regla o criterio, crea un cajón y describe su contenido.</p>
+    </div>
+    ${ticketShowNew ? drawerFormHTML('Crear cajón', 'newDrawerSave()', false) : ''}
+    ${State.drawers.length===0 && !ticketShowNew ? `
+    <div class="flex flex-col items-center py-20 rounded-xl border-2 border-dashed border-gray-200 text-gray-400">
+      <i class="fa-regular fa-folder-open text-3xl mb-3 opacity-40"></i><p class="text-sm font-medium">Sin cajones todavía</p></div>` : `
+    <div class="space-y-3">
+      ${State.drawers.map(d => { const isOpen = ticketExpanded===d.id, isEditing = ticketEditing===d.id;
+        const colorMeta = DRAWER_COLORS.find(c=>c.value===d.color) || DRAWER_COLORS[0];
+        return `
+        <div class="rounded-xl border bg-white overflow-hidden shadow-sm" style="border-color:${isOpen?d.color:'#E5E7EB'}">
+          <div class="flex items-center gap-3 px-5 py-4 cursor-pointer select-none" style="background:${isOpen?colorMeta.bg:'white'}" onclick="${isEditing?'':`drawerToggle(${d.id})`}">
+            <span class="flex-shrink-0 w-3 h-3 rounded-full" style="background:${d.color}"></span>
+            <p class="flex-1 text-sm font-semibold text-gray-800">${esc(d.title)}</p>
+            <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:block">Editado ${esc(d.lastEdited)}</span>
+            <div class="flex items-center gap-1 ml-2" onclick="event.stopPropagation()">
+              <button onclick="drawerEdit(${d.id})" class="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"><i class="fa-solid fa-pen text-xs"></i></button>
+              <button onclick="drawerDelete(${d.id})" class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"><i class="fa-solid fa-trash text-xs"></i></button>
+            </div>
+            <i class="fa-solid fa-chevron-down text-gray-400 text-xs transition-transform" style="transform:rotate(${isOpen?180:0}deg)"></i>
+          </div>
+          ${isOpen ? `<div class="border-t px-5 py-5" style="border-color:#E5E7EB">
+            ${isEditing ? drawerFormHTML('Guardar cambios', `drawerSaveEdit(${d.id})`, true)
+              : `<p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${d.content ? nl2br(d.content) : '<span class="italic text-gray-400">Sin contenido.</span>'}</p>`}
+          </div>` : ''}
+        </div>`; }).join('')}
+    </div>`}
+  </article>`;
+}
+
+/* ── Static Data ── */
+let staticForm = { supplier:'', description:'', files:[] };
+let staticExpanded = null;
+
+function staticHandleFiles(input, activeId){
+  Array.from(input.files||[]).forEach(f => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const size = f.size<1024?`${f.size} B`:f.size<1048576?`${(f.size/1024).toFixed(1)} KB`:`${(f.size/1048576).toFixed(1)} MB`;
+      staticForm.files.push({ name: f.name, size, dataUrl: ev.target.result });
+      renderMain();
+    };
+    reader.readAsDataURL(f);
+  });
+  input.value = '';
+}
+function staticRemovePending(i){ staticForm.files.splice(i,1); renderMain(); }
+function staticSubmit(activeId){
+  if (!staticForm.supplier.trim()) return;
+  const today = new Date().toLocaleDateString('es-ES');
+  State.staticRecords[activeId].unshift({ id: Date.now(), supplier: staticForm.supplier.trim(), description: staticForm.description.trim(), files: staticForm.files, createdAt: today });
+  staticForm = { supplier:'', description:'', files:[] };
+  persist(); renderMain();
+}
+function staticDelete(activeId, id){ State.staticRecords[activeId] = State.staticRecords[activeId].filter(r=>r.id!==id); persist(); renderMain(); }
+function staticToggle(id){ staticExpanded = staticExpanded===id ? null : id; renderMain(); }
+
+function renderStaticDataPage(activeId){
+  const isAuto = activeId === 'std-automatica';
+  const title = isAuto ? 'Static Data – Tareas Automáticas' : 'Static Data – Tareas Manuales FTP';
+  const crumbs = isAuto ? ['Wiki Suppliers','Static Data','Tareas Automáticas'] : ['Wiki Suppliers','Static Data','Tareas Manuales FTP'];
+  const subtitle = isAuto ? 'Registros de procesos de sincronización automática por proveedor.' : 'Registros de transferencias manuales FTP/SFTP por proveedor.';
+  const records = State.staticRecords[activeId];
+
+  return `
+  <article class="max-w-4xl mx-auto px-8 py-8 fade-in">
+    ${breadcrumbsHTML(crumbs)}
+    <h1 class="text-3xl font-bold text-gray-900 mb-2" style="letter-spacing:-0.02em">${title}</h1>
+    <p class="text-sm text-gray-500 mb-8">${subtitle}</p>
+
+    <section class="mb-10 rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+      <div class="px-6 py-4 border-b border-gray-100 flex items-center gap-2" style="background:#fafafa"><i class="fa-solid fa-plus text-xs" style="color:#C8102E"></i><h2 class="text-sm font-semibold text-gray-700">Nuevo registro</h2></div>
+      <div class="px-6 py-5 space-y-4">
+        <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Proveedor <span style="color:#C8102E">*</span></label>
+          <input type="text" placeholder="Nombre del proveedor…" value="${esc(staticForm.supplier)}" oninput="staticForm.supplier=this.value"
+            class="w-full px-4 py-2.5 text-sm rounded-lg border border-gray-200 bg-gray-50 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"></div>
+        <div><label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Descripción del documento</label>
+          <textarea rows="3" placeholder="Describe el contenido, propósito o notas relevantes…" oninput="staticForm.description=this.value"
+            class="w-full px-4 py-3 text-sm rounded-lg border border-gray-200 bg-gray-50 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100 resize-none">${esc(staticForm.description)}</textarea></div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Archivos adjuntos</label>
+          <div onclick="document.getElementById('staticFileInput_${activeId}').click()"
+            class="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-200 py-6 cursor-pointer hover:border-red-300 hover:bg-red-50">
+            <i class="fa-solid fa-cloud-arrow-up text-xl opacity-60" style="color:#C8102E"></i>
+            <p class="text-sm text-gray-500">Arrastra archivos aquí o <span class="font-semibold" style="color:#C8102E">haz clic para seleccionar</span></p>
+            <p class="text-xs text-gray-400">PDF, XLSX, DOCX, CSV, imágenes…</p>
+          </div>
+          <input id="staticFileInput_${activeId}" type="file" multiple class="hidden" onchange="staticHandleFiles(this,'${activeId}')">
+          ${staticForm.files.length ? `<ul class="mt-3 space-y-1.5">
+            ${staticForm.files.map((f,i) => { const m=fileMeta(f.name); return `
+            <li class="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200">
+              <span class="text-xs font-bold rounded px-1.5 py-0.5" style="background:${m.bg};color:${m.c};font-family:monospace">${m.label}</span>
+              <span class="flex-1 text-sm text-gray-700 truncate">${esc(f.name)}</span>
+              <span class="text-xs text-gray-400 flex-shrink-0">${f.size}</span>
+              <button onclick="staticRemovePending(${i})" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-xmark text-xs"></i></button>
+            </li>`; }).join('')}</ul>` : ''}
+        </div>
+        <div class="flex justify-end pt-2">
+          <button onclick="staticSubmit('${activeId}')" class="px-5 py-2.5 rounded-lg text-sm font-semibold text-white" style="background:#C8102E;opacity:${staticForm.supplier.trim()?1:.45}">Guardar registro</button>
+        </div>
+      </div>
+    </section>
+
+    ${records.length===0 ? `
+    <div class="flex flex-col items-center justify-center py-16 rounded-xl border-2 border-dashed border-gray-200 text-gray-400">
+      <i class="fa-regular fa-file-lines text-3xl mb-3 opacity-40"></i><p class="text-sm font-medium">Sin registros todavía</p></div>` : `
+    <div class="space-y-3">
+      ${records.map(rec => { const isOpen = staticExpanded===rec.id; return `
+      <div class="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+        <div class="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-gray-50" onclick="staticToggle(${rec.id})">
+          <div class="flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 text-white" style="width:34px;height:34px;background:#C8102E">${esc(rec.supplier.charAt(0).toUpperCase())}</div>
+          <div class="flex-1 min-w-0"><p class="text-sm font-semibold text-gray-800 truncate">${esc(rec.supplier)}</p>${rec.description?`<p class="text-xs text-gray-500 truncate mt-0.5">${esc(rec.description)}</p>`:''}</div>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            ${rec.files.length ? `<span class="flex items-center gap-1 text-xs text-gray-400"><i class="fa-regular fa-file-lines"></i>${rec.files.length}</span>`:''}
+            <span class="text-xs text-gray-400">${esc(rec.createdAt)}</span>
+            <i class="fa-solid fa-chevron-down text-gray-400 text-xs transition-transform" style="transform:rotate(${isOpen?180:0}deg)"></i>
+          </div>
+        </div>
+        ${isOpen ? `<div class="px-5 pb-5 border-t border-gray-100">
+          ${rec.description ? `<div class="pt-4 pb-3"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Descripción</p><p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${esc(rec.description)}</p></div>`:''}
+          ${rec.files.length ? `<div class="${rec.description?'pt-3 border-t border-gray-100':'pt-4'}"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Archivos adjuntos (${rec.files.length})</p>
+            <ul class="space-y-1.5">${rec.files.map(f => { const m=fileMeta(f.name); return `
+              <li class="attachment-card flex items-center gap-3 px-4 py-2.5 rounded-lg border border-gray-200 bg-white">
+                <span class="flex items-center justify-center rounded-md text-xs font-bold flex-shrink-0" style="width:36px;height:36px;background:${m.bg};color:${m.c};font-family:monospace">${m.label}</span>
+                <div class="flex-1 min-w-0"><p class="text-sm font-medium text-gray-800 truncate">${esc(f.name)}</p><p class="text-xs text-gray-400 mt-0.5">${f.size}</p></div>
+                <a href="${f.dataUrl}" download="${esc(f.name)}" onclick="event.stopPropagation()" class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold" style="background:#FEF2F2;color:#C8102E"><i class="fa-solid fa-download"></i> Descargar</a>
+              </li>`; }).join('')}</ul></div>`:''}
+          ${!rec.files.length && !rec.description ? `<p class="pt-4 text-sm text-gray-400">Sin descripción ni archivos adjuntos.</p>`:''}
+          <div class="flex justify-end mt-4 pt-3 border-t border-gray-100">
+            <button onclick="staticDelete('${activeId}',${rec.id})" class="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-500"><i class="fa-solid fa-trash"></i> Eliminar registro</button>
+          </div>
+        </div>`:''}
+      </div>`; }).join('')}
+    </div>`}
+  </article>`;
+}
+
+/* ── Main render ── */
+function renderMain(){
+  let html;
+  if (State.searchOpen && State.searchQuery.trim()) {
+    const results = doSearch(State.searchQuery);
+    html = `<div class="max-w-4xl mx-auto px-8 py-8 fade-in">
+      <h2 class="text-xl font-bold text-gray-800 mb-1">Resultados de búsqueda</h2>
+      <p class="text-sm text-gray-500 mb-6">${results.length} artículo(s) encontrado(s) para "${esc(State.searchQuery)}"</p>
+      <div class="space-y-3">${results.map(r => `
+        <button onclick="navigate('${r.id}')" class="w-full text-left rounded-xl border border-gray-200 bg-white px-6 py-4 hover:border-red-200 hover:shadow-sm">
+          <p class="text-sm font-semibold text-gray-800">${esc(r.title)}</p><p class="text-xs text-gray-400 mt-1">${esc(r.breadcrumbs.join(' › '))}</p>
+          <p class="text-sm text-gray-500 mt-2">${esc(r.description)}</p></button>`).join('')}</div></div>`;
+  } else if (State.activeId === 'tickets') html = renderTicketsPage();
+  else if (State.activeId === 'std-automatica' || State.activeId === 'std-manual-ftp') html = renderStaticDataPage(State.activeId);
+  else if (State.activeId === 'proveedores') html = renderSupplierListPage();
+  else html = renderPageContent(PAGES[State.activeId]);
+  document.getElementById('mainSlot').innerHTML = html;
+}
+
+function render(){
+  document.getElementById('app').innerHTML = `
+    <div id="headerSlot">${renderHeader()}</div>
+    <div class="flex flex-1 min-h-0">
+      ${renderSidebar()}
+      <main class="flex-1 overflow-y-auto bg-white relative">
+        <div id="mainSlot"></div>
+      </main>
+    </div>
+    ${renderAIPanel()}
+  `;
+  renderMain();
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   ASISTENTE IA (Groq) — búsqueda, análisis y refinamiento de la información
+   Las peticiones van a CONFIG.groqProxyUrl (nunca directo a Groq), que oculta
+   la API key. Ver groq-proxy-worker.js.
+   ════════════════════════════════════════════════════════════════════════ */
+function toggleAI(){ State.aiOpen = !State.aiOpen; render(); if(State.aiOpen) document.getElementById('aiInput')?.focus(); }
+
+function renderAIPanel(){
+  return `
+  <div id="ai-panel" class="fixed top-0 right-0 h-full w-96 max-w-full bg-white border-l border-gray-200 shadow-2xl z-40 flex flex-col"
+       style="transform:translateX(${State.aiOpen?'0':'100%'})">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100" style="background:#C8102E">
+      <div class="flex items-center gap-2 text-white"><i class="fa-solid fa-wand-magic-sparkles"></i><span class="font-semibold text-sm">Asistente IA · Wiki Suppliers</span></div>
+      <button onclick="toggleAI()" class="text-white opacity-80 hover:opacity-100"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    ${!CONFIG.groqProxyUrl ? `
+    <div class="p-5 text-sm text-gray-600 leading-relaxed">
+      <i class="fa-solid fa-triangle-exclamation mb-2" style="color:#D97706"></i>
+      <p>El asistente aún no está conectado. Despliega <code class="bg-gray-100 px-1 rounded">groq-proxy-worker.js</code> y añade la URL en <code class="bg-gray-100 px-1 rounded">CONFIG.groqProxyUrl</code>.</p>
+    </div>` : `
+    <div id="aiMessages" class="flex-1 overflow-y-auto px-4 py-4 space-y-3 text-sm">
+      ${State.aiMessages.length===0 ? `<p class="text-gray-400 text-xs">Pregunta lo que necesites sobre proveedores, Static Data, tickets, errores comunes o documentación. El asistente responde con base en el contenido de esta wiki.</p>` :
+        State.aiMessages.map(m => `
+        <div class="flex ${m.role==='user'?'justify-end':'justify-start'}">
+          <div class="max-w-[85%] rounded-lg px-3 py-2 ${m.role==='user'?'text-white':'bg-gray-100 text-gray-800'}" style="${m.role==='user'?'background:#C8102E':''}">
+            <p class="whitespace-pre-wrap">${esc(m.content)}</p>
+          </div>
+        </div>`).join('')}
+      ${State.aiLoading ? `<div class="flex justify-start"><div class="bg-gray-100 rounded-lg px-3 py-2"><span class="typing-dot">●</span> <span class="typing-dot">●</span> <span class="typing-dot">●</span></div></div>` : ''}
+    </div>
+    <div class="border-t border-gray-100 p-3">
+      <div class="flex gap-2">
+        <input id="aiInput" type="text" placeholder="Escribe tu pregunta…" onkeydown="if(event.key==='Enter')sendAIMessage()"
+          class="flex-1 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100">
+        <button onclick="sendAIMessage()" class="px-3 py-2 rounded-lg text-white" style="background:#C8102E"><i class="fa-solid fa-paper-plane text-xs"></i></button>
+      </div>
+    </div>`}
+  </div>`;
+}
+
+function wikiContextForAI(){
+  // Serializa el contenido de la wiki como contexto para el modelo (RAG simple)
+  return Object.entries(PAGES).map(([id,p]) => `### ${p.title}\n${p.description}\n${p.steps.map(s=>`- ${s.title}: ${s.content}`).join('\n')}`).join('\n\n')
+    + '\n\n### Proveedores preferred\n' + State.suppliers.join(', ')
+    + '\n\n### Cajones de tickets\n' + State.drawers.map(d=>`- ${d.title}: ${d.content}`).join('\n');
+}
+
+async function sendAIMessage(){
+  const input = document.getElementById('aiInput');
+  const text = input.value.trim();
+  if (!text || !CONFIG.groqProxyUrl) return;
+  State.aiMessages.push({ role:'user', content:text });
+  input.value = '';
+  State.aiLoading = true;
+  render(); document.getElementById('aiMessages').scrollTop = 1e9;
+
+  try {
+    const res = await fetch(CONFIG.groqProxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'Eres el asistente de la Wiki Suppliers de Juniper. Responde en español, de forma breve y precisa, basándote solo en el CONTEXTO proporcionado. Si la respuesta no está en el contexto, dilo claramente.\n\nCONTEXTO:\n' + wikiContextForAI() },
+          ...State.aiMessages
+        ]
+      })
+    });
+    const data = await res.json();
+    State.aiMessages.push({ role:'assistant', content: data.reply || 'No se recibió respuesta del asistente.' });
+  } catch(e){
+    State.aiMessages.push({ role:'assistant', content: 'Error al conectar con el asistente. Verifica el proxy de Groq.' });
+  }
+  State.aiLoading = false;
+  render();
+  document.getElementById('aiMessages').scrollTop = 1e9;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   INICIO
+   ════════════════════════════════════════════════════════════════════════ */
+document.addEventListener('click', (e) => {
+  if (State.searchOpen && !e.target.closest('#searchInput') && !e.target.closest('#headerSlot')) { State.searchOpen=false; renderHeaderOnly(); }
+});
+render();
+if (FIREBASE_ENABLED) loadFromFirestore();
+</script>
+</body>
+</html>
