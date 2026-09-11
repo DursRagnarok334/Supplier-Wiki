@@ -66,8 +66,8 @@ const CONFIG = {
   //    Google Picker API y Drive API, y añade tu dominio de GitHub Pages
   //    en "Orígenes autorizados de JavaScript".
   googleDrive: {
-    clientId: "",
-    apiKey: ""
+    clientId: "533555147769-tpvt525recdpcopgsics242907ns870v.apps.googleusercontent.com",
+    apiKey: "AIzaSyDtPaTba9gw7hNp_V9C_WbUCrMc3-vE5Rc"
   }
 };
 
@@ -98,18 +98,18 @@ const NAV = [
 
 const PAGES = {
   proveedores: {
-    title: 'Lista de Proveedores Preferred',
-    breadcrumbs: ['Wiki Suppliers', 'Lista proveedores preferred'],
-    description: 'Directorio oficial de proveedores con estatus "Preferred" aprobado por el equipo de compras. Estos proveedores han superado el proceso de homologación y cumplen con los estándares de calidad, precio y servicio establecidos por la compañía.',
+    title: 'Lista de Proveedores Prefered',
+    breadcrumbs: ['Wiki Suppliers', 'Lista proveedores prefered'],
+    description: 'Directorio oficial de proveedores con estatus "prefered" aprobado por el equipo de compras. Estos proveedores han superado el proceso de homologación y cumplen con los estándares de calidad, precio y servicio establecidos por la compañía.',
     objective: 'Centralizar y mantener actualizada la lista de proveedores de confianza para agilizar el proceso de selección y aprobación en nuevos proyectos de integración.',
     steps: [
-      { title: '1. Consultar el registro central', content: 'Accede al documento maestro en SharePoint → Compras → Proveedores → Preferred_Suppliers_2025.xlsx. Verifica que el proveedor figure en la columna "Estado" con el valor ACTIVO.' },
+      { title: '1. Consultar el registro central', content: 'Accede al documento maestro en SharePoint → Compras → Proveedores → prefered_Suppliers_2025.xlsx. Verifica que el proveedor figure en la columna "Estado" con el valor ACTIVO.' },
       { title: '2. Verificar vigencia del contrato', content: 'Comprueba en la columna "Vencimiento Contrato" que la fecha no haya expirado. Si el contrato está próximo a vencer (< 30 días), notifica al equipo de compras mediante el canal #suppliers-alerts en Slack.' },
       { title: '3. Solicitar alta de nuevo proveedor', content: 'Si el proveedor deseado no figura en la lista, completa el formulario de alta (Plantilla_Alta_Proveedor.docx) y envíalo a suppliers@juniper.com. El proceso de revisión tarda entre 5 y 10 días hábiles.' },
       { title: '4. Actualizar el registro', content: 'Tras recibir confirmación de aprobación, el responsable de área deberá actualizar el registro central con los datos del nuevo proveedor, incluyendo: nombre, CIF, contacto comercial, condiciones de pago y categoría de servicio.' },
     ],
     attachments: [
-      { name: 'Preferred_Suppliers_2025.xlsx', type: 'XLSX', size: '248 KB' },
+      { name: 'prefered_Suppliers_2025.xlsx', type: 'XLSX', size: '248 KB' },
       { name: 'Formulario_Alta_Proveedor.docx', type: 'DOCX', size: '84 KB' },
       { name: 'Política_Homologación_Proveedores.pdf', type: 'PDF', size: '1.2 MB' },
       { name: 'Panel Power BI – Proveedores', type: 'LINK' },
@@ -503,8 +503,8 @@ function removeSupplier(i){ State.suppliers.splice(i,1); persist(); renderMain()
 function renderSupplierListPage(){
   return `
   <article class="max-w-3xl mx-auto px-8 py-8 fade-in">
-    ${breadcrumbsHTML(['Wiki Suppliers','Lista proveedores preferred'])}
-    <h1 class="text-3xl font-bold text-gray-900 mb-2" style="letter-spacing:-0.02em">Lista de Proveedores Preferred</h1>
+    ${breadcrumbsHTML(['Wiki Suppliers','Lista proveedores prefered'])}
+    <h1 class="text-3xl font-bold text-gray-900 mb-2" style="letter-spacing:-0.02em">Lista de Proveedores prefered</h1>
     <p class="text-sm text-gray-500 mb-8">Proveedores homologados y aprobados por el equipo de compras. <span class="font-semibold text-gray-700">${State.suppliers.length}</span> ${State.suppliers.length===1?'proveedor registrado':'proveedores registrados'}.</p>
     <div class="flex gap-2 mb-8">
       <input id="supplierInput" type="text" placeholder="Nombre del proveedor…" onkeydown="if(event.key==='Enter')addSupplier()"
@@ -793,7 +793,7 @@ function renderAIPanel(){
 function wikiContextForAI(){
   // Serializa el contenido de la wiki como contexto para el modelo (RAG simple)
   return Object.entries(PAGES).map(([id,p]) => `### ${p.title}\n${p.description}\n${p.steps.map(s=>`- ${s.title}: ${s.content}`).join('\n')}`).join('\n\n')
-    + '\n\n### Proveedores preferred\n' + State.suppliers.join(', ')
+    + '\n\n### Proveedores prefered\n' + State.suppliers.join(', ')
     + '\n\n### Cajones de tickets\n' + State.drawers.map(d=>`- ${d.title}: ${d.content}`).join('\n');
 }
 
